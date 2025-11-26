@@ -6,8 +6,7 @@ import com.sd.rastreio.repository.RastreioRepository;
 import com.sd.rastreio.rabbitmq.RabbitUtils;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional; // <--- IMPORT NOVO
-
+import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 
 @Component
@@ -23,7 +22,7 @@ public class RastreioConsumer {
     }
 
     @RabbitListener(queues = "fila_rastreio_trabalho")
-    @Transactional // <--- ADICIONE ISSO AQUI
+    @Transactional
     public void processarAtualizacao(String idRastreioString) {
         System.out.println("👷 [Worker] Recebido ID: " + idRastreioString);
 
@@ -32,28 +31,42 @@ public class RastreioConsumer {
             Rastreio rastreio = rastreioRepository.findById(id).orElse(null);
 
             if (rastreio != null) {
-                // 1. CONSULTA API E ATUALIZA BANCO
+                // 1. Consulta API (Busca o novo estado na Wonca)
                 String novoJson = woncaService.consultarRastreioNaApi(rastreio.getCodigoRastreio());
-                rastreio.setHistoricoJson(novoJson);
-                rastreioRepository.save(rastreio);
 
-                // 2. NOTIFICAÇÃO
-                try {
-                    // Aqui ele acessa rastreio.getPessoa().getEmail()
-                    // Com @Transactional, a conexão fica aberta e isso funciona!
-                    Map<String, String> eventoEmail = Map.of(
-                            "emailDestino", rastreio.getPessoa().getEmail(),
-                            "conteudoEmail",
-                            "O pacote " + rastreio.getCodigoRastreio() + " teve uma atualização de status!");
+                // 2. Pega o estado que já estava salvo no banco
+                String jsonAntigo = rastreio.getHistoricoJson();
 
-                    String jsonMensagem = mapper.writeValueAsString(eventoEmail);
-                    RabbitUtils.publish("status.email", jsonMensagem);
+                // 3. VERIFICAÇÃO: Só faz algo se houver mudança real
+                // (Se novoJson for diferente do Antigo, ou se o Antigo for null/vazio)
+                if (novoJson != null && !novoJson.equals(jsonAntigo)) {
 
-                    System.out.println("✅ Atualizado e notificado (JSON enviado com sucesso).");
+                    System.out.println("🔄 Mudança de status detectada! Atualizando...");
 
-                } catch (Exception e) {
-                    System.err.println("⚠️ Erro ao enviar notificação: " + e.getMessage());
-                    e.printStackTrace(); // Ajuda a ver mais detalhes se der erro
+                    // Atualiza o banco com a novidade
+                    rastreio.setHistoricoJson(novoJson);
+                    rastreioRepository.save(rastreio);
+
+                    // Envia Notificação (Pois houve mudança)
+                    try {
+                        Map<String, String> eventoEmail = Map.of(
+                                "emailDestino", rastreio.getPessoa().getEmail(),
+                                "conteudoEmail",
+                                "O pacote " + rastreio.getCodigoRastreio() + " teve uma atualização de status!");
+
+                        String jsonMensagem = mapper.writeValueAsString(eventoEmail);
+                        RabbitUtils.publish("status.email", jsonMensagem);
+
+                        System.out.println("✅ E-mail de notificação enviado.");
+
+                    } catch (Exception e) {
+                        System.err.println("⚠️ Erro ao enviar notificação: " + e.getMessage());
+                    }
+
+                } else {
+                    // Se o JSON for idêntico, não fazemos nada
+                    System.out.println("💤 Sem novidades. O status do pacote " + rastreio.getCodigoRastreio()
+                            + " continua igual. E-mail não enviado.");
                 }
             }
         } catch (Exception e) {

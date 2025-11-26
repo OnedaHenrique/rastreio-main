@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Rastreio Distribuído</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; display: flex; gap: 20px; background-color: #f0f2f5; }
+        .container { flex: 1; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        input { width: 95%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px;}
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px;}
+        button:hover { background: #0056b3; }
+        #resposta, #respostaBusca, #respostaCadastro { margin-top: 10px; padding: 10px; border-radius: 4px; }
+        ul { list-style: none; padding: 0; }
+        li { background: #f9f9f9; padding: 10px; border-bottom: 1px solid #ddd; }
+        .status-badge { background: #e2e6ea; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2> Cadastrar Usuário</h2>
+
+        <label>Nome:</label>
+        <input type="text" id="nomeUsuario" placeholder="Ex: Aline">
+
+        <label>Email:</label>
+        <input type="email" id="emailUsuario" placeholder="Ex: exemplo@gmail.com">
+
+        <button id="botaoCadastrar">Cadastrar Usuário</button>
+
+        <div id="respostaCadastro"></div>
+    </div>
+
+    <div class="container">
+        <h2> Cadastrar Rastreio </h2>
+        
+        <label>ID da Pessoa:</label>
+        <input type="number" id="idPessoa" placeholder="Ex: 1">
+
+        <label>Código de Rastreio:</label>
+        <input type="text" id="codigo" placeholder="Ex: ND682256633BR">
+        
+        <button id="botaoEnviar">Consultar API e Salvar</button>
+        
+        <div id="resposta"></div>
+    </div>
+
+    <div class="container">
+        <h2> Procurar Meus Pacotes</h2>
+        
+        <label>ID da Pessoa:</label>
+        <input type="number" id="pessoaIdBusca">
+        
+        <button id="botaoBuscar">Listar</button>
+        
+        <div id="respostaBusca"></div>
+        <ul id="listaRastreios"></ul>
+    </div>
+
+
+    <script>
+        // --- POST RASTREIO ---
+        document.getElementById("botaoEnviar").addEventListener("click", () => {
+            const idDaPessoa = document.getElementById("idPessoa").value;
+            const codigoRastreio = document.getElementById("codigo").value;
+            const divResposta = document.getElementById("resposta");
+
+            divResposta.textContent = "Consultando API externa...";
+            divResposta.style.background = "#e2e3e5";
+
+            const dadosParaEnviar = {
+                codigo: codigoRastreio,
+                idPessoa: idDaPessoa
+            };
+
+            fetch("/api/rastrear", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(dadosParaEnviar)
+            })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(result => {
+                divResposta.textContent = result.data.mensagem;
+                divResposta.style.background = result.ok ? "#d4edda" : "#f8d7da";
+            })
+            .catch(err => {
+                divResposta.textContent = "Erro: " + err.message;
+                divResposta.style.background = "#f8d7da";
+            });
+        });
+
+        // --- GET RASTREIOS ---
+        document.getElementById("botaoBuscar").addEventListener("click", () => {
+            const idBusca = document.getElementById("pessoaIdBusca").value;
+            const listaUl = document.getElementById("listaRastreios");
+            listaUl.innerHTML = "";
+
+            fetch("/api/rastreios?pessoaId=" + idBusca)
+            .then(res => res.json())
+            .then(lista => {
+                lista.forEach(item => {
+                    const li = document.createElement("li");
+                    let status = "Sem detalhes";
+
+                    if (item.historicoJson) {
+                        try {
+                            const obj = JSON.parse(item.historicoJson);
+                            if (obj.results && obj.results.length > 0 && obj.results[0].json) {
+                                const correiosData = JSON.parse(obj.results[0].json);
+                                if(correiosData.eventos && correiosData.eventos.length > 0) {
+                                    status = correiosData.eventos[0].descricao;
+                                }
+                            }
+                        } catch (e) { console.error(e); }
+                    }
+
+                    li.innerHTML = `<strong>${item.codigoRastreio}</strong> <br> 
+                                    <span class='status-badge'>${status}</span>`;
+                    listaUl.appendChild(li);
+                });
+            });
+        });
+
+        // --- POST USUÁRIO ---
+        document.getElementById("botaoCadastrar").addEventListener("click", () => {
+            const nome = document.getElementById("nomeUsuario").value;
+            const email = document.getElementById("emailUsuario").value;
+            const divMensagem = document.getElementById("respostaCadastro");
+
+            const dados = { nome, email };
+
+            divMensagem.textContent = "Enviando...";
+            divMensagem.style.background = "#e2e3e5";
+
+            fetch("/api/pessoas", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(dados)
+            })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(result => {
+                divMensagem.textContent = result.data.mensagem || "Usuário cadastrado com sucesso!";
+                divMensagem.style.background = result.ok ? "#d4edda" : "#f8d7da";
+            })
+            .catch(err => {
+                divMensagem.textContent = "Erro: " + err.message;
+                divMensagem.style.background = "#f8d7da";
+            });
+        });
+    </script>
+
+</body>
+</html>
